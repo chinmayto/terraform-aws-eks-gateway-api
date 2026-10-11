@@ -1,133 +1,155 @@
 ################################################################################
-# Install Gateway API CRDs
+# Install Gateway API CRDs (standard channel v1.2.1)
+# Traefik v3.3 supports Gateway API standard v1.2.1.
+# Must be applied before Traefik so the GatewayClass/Gateway/HTTPRoute CRDs
+# exist when Traefik starts up and tries to watch them.
 ################################################################################
 resource "null_resource" "gateway_api_crds" {
   provisioner "local-exec" {
-    command = "kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.0/standard-install.yaml"
+    command = "kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml"
   }
 
   depends_on = [module.eks, null_resource.update_kubeconfig]
 }
 
 ################################################################################
-# Create aws-load-balancer-system namespace
+# Namespace for Traefik
 ################################################################################
-resource "kubernetes_namespace" "aws_load_balancer_system" {
+resource "kubernetes_namespace_v1" "traefik" {
   metadata {
-    name = "aws-load-balancer-system"
+    name = "traefik"
     labels = {
-      name = "aws-load-balancer-system"
+      name = "traefik"
     }
   }
   depends_on = [module.eks]
 }
 
 ################################################################################
-# IAM Role for AWS Load Balancer Controller
+# Install Traefik via Helm
+#
+# Traefik acts as the Gateway API controller. It registers itself as the
+# controller for the "traefik" GatewayClass and exposes itself via a Service
+# of type LoadBalancer — AWS cloud-controller-manager provisions the NLB
+# automatically. No AWS Load Balancer Controller or IRSA role needed.
+#
+# Key decisions:
+#   providers.kubernetesGateway.enabled     — enables the Gateway API provider
+#     (this is under providers, NOT experimental)
+#   providers.kubernetesIngress.enabled     — disabled; Gateway API only
+#   gateway.enabled                         — let Traefik auto-create the
+#                                             GatewayClass and a default Gateway
+#                                             in the traefik namespace
+#   gateway.listeners.web.port              — map to the web entrypoint (8000)
+#   gateway.listeners.web.namespacePolicy   — allow routes from all namespaces
+#   service.annotations                     — request an internet-facing NLB
+#     "nlb" is the correct value for the in-tree AWS cloud-controller-manager
+#     (distinct from the AWS LBC which uses "external")
 ################################################################################
-resource "aws_iam_role" "aws_load_balancer_controller" {
-  name = "${var.cluster_name}-aws-load-balancer-controller"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRoleWithWebIdentity"
-        Effect = "Allow"
-        Principal = {
-          Federated = module.eks.oidc_provider_arn
-        }
-        Condition = {
-          StringEquals = {
-            "${replace(module.eks.cluster_oidc_issuer_url, "https://", "")}:sub" = "system:serviceaccount:aws-load-balancer-system:aws-load-balancer-controller"
-            "${replace(module.eks.cluster_oidc_issuer_url, "https://", "")}:aud" = "sts.amazonaws.com"
-          }
-        }
-      }
-    ]
-  })
-
-  tags = {
-    Name      = "${var.cluster_name}-aws-load-balancer-controller"
-    Terraform = "true"
-  }
-}
-
-################################################################################
-# Data source for AWS Load Balancer Controller IAM Policy
-################################################################################
-data "http" "aws_load_balancer_controller_policy" {
-  url = "https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/v2.8.1/docs/install/iam_policy.json"
-
-  request_headers = {
-    Accept = "application/json"
-  }
-}
-
-################################################################################
-# IAM Policy for AWS Load Balancer Controller (from official source)
-################################################################################
-resource "aws_iam_policy" "aws_load_balancer_controller" {
-  name        = "${var.cluster_name}-aws-load-balancer-controller"
-  description = "IAM policy for AWS Load Balancer Controller"
-  policy      = data.http.aws_load_balancer_controller_policy.response_body
-
-  tags = {
-    Name      = "${var.cluster_name}-aws-load-balancer-controller"
-    Terraform = "true"
-  }
-}
-
-################################################################################
-# IAM Policy Attachment for AWS Load Balancer Controller
-################################################################################
-resource "aws_iam_role_policy_attachment" "aws_load_balancer_controller" {
-  policy_arn = aws_iam_policy.aws_load_balancer_controller.arn
-  role       = aws_iam_role.aws_load_balancer_controller.name
-}
-
-################################################################################
-# Install AWS Load Balancer Controller using Helm
-################################################################################
-resource "helm_release" "aws_load_balancer_controller" {
-  name       = "aws-load-balancer-controller"
-  repository = "https://aws.github.io/eks-charts"
-  chart      = "aws-load-balancer-controller"
-  namespace  = kubernetes_namespace.aws_load_balancer_system.metadata[0].name
-  version    = "1.8.1"
+resource "helm_release" "traefik" {
+  name             = "traefik"
+  repository       = "https://traefik.github.io/charts"
+  chart            = "traefik"
+  namespace        = kubernetes_namespace_v1.traefik.metadata[0].name
+  version          = "33.2.1"
+  create_namespace = false
 
   values = [
     yamlencode({
-      clusterName = var.cluster_name
-      serviceAccount = {
-        create = true
-        name   = "aws-load-balancer-controller"
-        annotations = {
-          "eks.amazonaws.com/role-arn" = aws_iam_role.aws_load_balancer_controller.arn
+      providers = {
+        # Enable the Gateway API provider (correct key: providers.kubernetesGateway)
+        kubernetesGateway = {
+          enabled = true
+        }
+        # Disable Ingress provider — we use Gateway API only
+        kubernetesIngress = {
+          enabled = false
         }
       }
-      region                      = var.aws_region
-      vpcId                       = module.vpc.vpc_id
-      enableServiceMutatorWebhook = false
+
+      # Expose Traefik via an AWS NLB (internet-facing)
+      # "nlb" is the correct value for the in-tree Kubernetes cloud-controller-manager on EKS.
+      service = {
+        type = "LoadBalancer"
+        annotations = {
+          "service.beta.kubernetes.io/aws-load-balancer-type"                              = "nlb"
+          "service.beta.kubernetes.io/aws-load-balancer-scheme"                            = "internet-facing"
+          "service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled" = "true"
+        }
+      }
+
+      # Traefik auto-creates a GatewayClass and a default Gateway in its own namespace.
+      # We configure the Gateway's web listener to:
+      #   - listen on the web entrypoint port (8000 internally, exposed as 80 on the NLB)
+      #   - accept HTTPRoutes from all namespaces
+      gateway = {
+        enabled = true
+        name    = "traefik"
+        # Deploy the auto-created Gateway into gateway-system namespace
+        # so it co-locates with our app-gateway.yaml manifest
+        namespace = kubernetes_namespace_v1.traefik.metadata[0].name
+        listeners = {
+          web = {
+            port     = 8000
+            protocol = "HTTP"
+            hostname = var.domain_name == "" ? "" : "*.${var.domain_name}"
+            namespacePolicy = "All"
+          }
+        }
+      }
+
+      gatewayClass = {
+        enabled = true
+        name    = "traefik"
+      }
+
+      # Entrypoints
+      ports = {
+        web = {
+          port     = 8000
+          protocol = "TCP"
+          expose = {
+            default = true
+          }
+          # Map NLB port 80 → container port 8000
+          exposedPort = 80
+        }
+        websecure = {
+          port     = 8443
+          protocol = "TCP"
+          expose = {
+            default = false
+          }
+        }
+        # Keep dashboard internal only — never expose on the public NLB
+        traefik = {
+          expose = {
+            default = false
+          }
+        }
+      }
+
+      # Basic resource limits for t3.medium nodes
+      resources = {
+        requests = {
+          cpu    = "100m"
+          memory = "128Mi"
+        }
+        limits = {
+          cpu    = "500m"
+          memory = "256Mi"
+        }
+      }
+
+      # Two replicas for HA across the two worker nodes
+      deployment = {
+        replicas = 2
+      }
     })
   ]
 
   depends_on = [
-    kubernetes_namespace.aws_load_balancer_system,
-    aws_iam_role_policy_attachment.aws_load_balancer_controller,
+    kubernetes_namespace_v1.traefik,
     null_resource.gateway_api_crds
   ]
-}
-
-################################################################################
-# Output for manual DNS configuration
-################################################################################
-output "gateway_dns_instructions" {
-  description = "Instructions for configuring DNS after Gateway deployment"
-  value = {
-    message = "After deploying the Gateway resources, get the LoadBalancer hostname with: kubectl get gateway app-gateway -n gateway-system -o jsonpath='{.status.addresses[0].value}'"
-    route53_zone_id = data.aws_route53_zone.main.zone_id
-    subdomain = var.app_subdomain
-    domain = var.domain_name
-  }
 }

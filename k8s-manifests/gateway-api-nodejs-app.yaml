@@ -5,8 +5,9 @@ metadata:
   namespace: simple-nodejs-app
 spec:
   parentRefs:
-    - name: app-gateway
-      namespace: gateway-system
+    - name: traefik        # Gateway auto-created by the Traefik Helm chart
+      namespace: traefik   # Traefik deploys it into its own namespace
+      sectionName: web     # Ties to the named "web" listener (port 80)
   hostnames:
     - "app.chinmayto.com"
   rules:

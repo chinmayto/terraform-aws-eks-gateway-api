@@ -39,51 +39,16 @@ output "public_subnets" {
 }
 
 ################################################################################
-# Gateway API Outputs
-################################################################################
-output "gateway_service_info" {
-  description = "Gateway API service information"
-  value = {
-    namespace    = "gateway-system"
-    gateway_name = "app-gateway"
-    service_type = "LoadBalancer"
-  }
-}
-
-output "gateway_access_info" {
-  description = "Gateway API access information"
-  value = {
-    gateway_class = "aws-load-balancer-controller"
-    controller    = "gateway.aws.com/controller"
-    gateway_name  = "app-gateway"
-    gateway_namespace = "gateway-system"
-    get_loadbalancer_command = "kubectl get gateway app-gateway -n gateway-system -o jsonpath='{.status.addresses[0].value}'"
-  }
-}
-
-output "aws_load_balancer_controller_info" {
-  description = "AWS Load Balancer Controller information"
-  value = {
-    namespace       = kubernetes_namespace.aws_load_balancer_system.metadata[0].name
-    service_account = "aws-load-balancer-controller"
-    iam_role_arn    = aws_iam_role.aws_load_balancer_controller.arn
-    iam_role_name   = aws_iam_role.aws_load_balancer_controller.name
-    iam_policy_arn  = aws_iam_policy.aws_load_balancer_controller.arn
-    helm_release    = helm_release.aws_load_balancer_controller.name
-    chart_version   = helm_release.aws_load_balancer_controller.version
-  }
-}
-
-################################################################################
 # Node.js App DNS Outputs
 ################################################################################
 output "nodejs_app_dns_info" {
   description = "Node.js application DNS configuration information"
   value = {
-    domain_name     = var.domain_name
-    subdomain       = var.app_subdomain
-    full_hostname   = "${var.app_subdomain}.${var.domain_name}"
-    app_url         = "http://${var.app_subdomain}.${var.domain_name}"
-    dns_record_type = "A (Alias to Gateway API LoadBalancer)"
+    domain_name    = var.domain_name
+    subdomain      = var.app_subdomain
+    full_hostname  = "${var.app_subdomain}.${var.domain_name}"
+    app_url        = "http://${var.app_subdomain}.${var.domain_name}"
+    hosted_zone_id = data.aws_route53_zone.main.zone_id
+    nlb_hostname   = data.kubernetes_service_v1.traefik.status[0].load_balancer[0].ingress[0].hostname
   }
 }
