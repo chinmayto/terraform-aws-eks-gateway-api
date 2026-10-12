@@ -1,7 +1,5 @@
 # Kubernetes Gateway API on Amazon EKS with Traefik — A Complete Guide
 
-> *Originally published on [dev.to](https://dev.to/chinmayto)*
-
 ---
 
 ## Introduction
@@ -312,8 +310,6 @@ To tear everything down cleanly — delete the Kubernetes resources first so the
 # 1. Delete Kubernetes resources (this deprovisions the NLB)
 kubectl delete -f k8s-manifests/gateway-api-nodejs-app.yaml
 kubectl delete -f k8s-manifests/deploy-simple-nodejs-app.yaml
-kubectl delete -f k8s-manifests/app-gateway.yaml
-kubectl delete -f k8s-manifests/gateway-system-namespace.yaml
 
 # 2. Wait ~60 seconds for the NLB to be fully removed by AWS
 sleep 60
@@ -344,7 +340,4 @@ The full deployment — VPC, EKS, Traefik, NLB, Route53 — is a single `terrafo
 - [Gateway API — Supported Features by Implementation](https://gateway-api.sigs.k8s.io/implementations/)
 - [Traefik Gateway API Documentation](https://doc.traefik.io/traefik/routing/providers/kubernetes-gateway/)
 - [Traefik Helm Chart](https://github.com/traefik/traefik-helm-chart)
-- [nginx Ingress — End of Support Announcement](https://github.com/kubernetes/ingress-nginx/issues/12159)
 - [Amazon EKS — Gateway API](https://docs.aws.amazon.com/eks/latest/userguide/gateway-api.html)
-- [terraform-aws-modules/eks](https://registry.terraform.io/modules/terraform-aws-modules/eks/aws/latest)
-- [terraform-aws-modules/vpc](https://registry.terraform.io/modules/terraform-aws-modules/vpc/aws/latest)
