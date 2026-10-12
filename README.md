@@ -1,12 +1,12 @@
-# Kubernetes Gateway API on Amazon EKS with Traefik — A Complete Guide
+# Kubernetes Gateway API on Amazon EKS with Traefik - A Complete Guide
 
 ---
 
 ## Introduction
 
-If you've been running Kubernetes workloads in production, you've almost certainly used an Ingress controller — probably nginx. It's been the de facto standard for routing external HTTP traffic into a cluster for years. But that era is coming to an end.
+If you've been running Kubernetes workloads in production, you've almost certainly used an Ingress controller - probably nginx. It's been the de facto standard for routing external HTTP traffic into a cluster for years. But that era is coming to an end.
 
-The nginx Ingress controller has announced **end of active support**, and the Kubernetes community has responded with a better answer: the **Gateway API**. In this post we'll walk through what Gateway API is, why it matters, how different controllers implement it, and how to deploy a real Node.js application on Amazon EKS using **Traefik** as the Gateway controller — all provisioned with Terraform.
+The nginx Ingress controller has announced **end of active support**, and the Kubernetes community has responded with a better answer: the **Gateway API**. In this post we'll walk through what Gateway API is, why it matters, how different controllers implement it, and how to deploy a real Node.js application on Amazon EKS using **Traefik** as the Gateway controller - all provisioned with Terraform.
 
 ---
 
@@ -27,7 +27,7 @@ This separation matters in real organizations. Platform teams control the `Gatew
 
 ### Why Move Away from nginx Ingress?
 
-The [Ingress-nginx](https://github.com/kubernetes/ingress-nginx) project — the community-maintained nginx Ingress controller — announced it is entering **maintenance-only mode**. New features will not be added, and the recommendation from the Kubernetes SIG-Network team is to migrate to Gateway API. The writing has been on the wall for a while: Ingress is a frozen API spec, and the ecosystem has moved on.
+The [Ingress-nginx](https://github.com/kubernetes/ingress-nginx) project - the community-maintained nginx Ingress controller - announced it is entering **maintenance-only mode**. New features will not be added, and the recommendation from the Kubernetes SIG-Network team is to migrate to Gateway API. The writing has been on the wall for a while: Ingress is a frozen API spec, and the ecosystem has moved on.
 
 If you're starting a new project today, Gateway API is the right choice. If you have existing Ingress resources, now is the time to plan the migration.
 
@@ -35,7 +35,7 @@ If you're starting a new project today, Gateway API is the right choice. If you 
 
 ## How Gateway API Controllers Work
 
-Gateway API itself is just a specification — a set of CRDs. The actual work of provisioning load balancers and routing traffic is done by a **Gateway controller**. Any controller can implement the spec; they just need to watch for `GatewayClass` resources that advertise their `controllerName`.
+Gateway API itself is just a specification - a set of CRDs. The actual work of provisioning load balancers and routing traffic is done by a **Gateway controller**. Any controller can implement the spec; they just need to watch for `GatewayClass` resources that advertise their `controllerName`.
 
 Some popular implementations:
 
@@ -56,7 +56,7 @@ For this walkthrough we chose Traefik because:
 
 - It's battle-tested in production and has first-class Gateway API support
 - It installs via a single Helm chart with no IAM roles or AWS-specific setup
-- It creates its own `Service` of type `LoadBalancer`, letting the AWS cloud-controller-manager provision the NLB automatically — no AWS Load Balancer Controller needed
+- It creates its own `Service` of type `LoadBalancer`, letting the AWS cloud-controller-manager provision the NLB automatically - no AWS Load Balancer Controller needed
 - The Traefik dashboard gives you live routing visibility out of the box
 
 ---
@@ -98,12 +98,12 @@ ClusterIP Services → Node.js Pods
 
 **Infrastructure components (all Terraform-managed):**
 
-- **VPC** — two public + two private subnets across two AZs, single NAT gateway
-- **EKS cluster** — managed node group, `t3.medium`, AL2023, Kubernetes 1.36
-- **EKS Addons** — `vpc-cni`, `kube-proxy`, `coredns`, `eks-pod-identity-agent`
-- **Gateway API CRDs** — installed via `kubectl apply` from the official v1.2.0 release
-- **Traefik** — installed via Helm chart v33.x, Gateway API provider enabled
-- **Route53 A record** — Terraform reads the NLB hostname from the Traefik Service and creates the alias record automatically
+- **VPC** - two public + two private subnets across two AZs, single NAT gateway
+- **EKS cluster** - managed node group, `t3.medium`, AL2023, Kubernetes 1.36
+- **EKS Addons** - `vpc-cni`, `kube-proxy`, `coredns`, `eks-pod-identity-agent`
+- **Gateway API CRDs** - installed via `kubectl apply` from the official v1.2.0 release
+- **Traefik** - installed via Helm chart v33.x, Gateway API provider enabled
+- **Route53 A record** - Terraform reads the NLB hostname from the Traefik Service and creates the alias record automatically
 
 **No AWS Load Balancer Controller. No IRSA. No separate IAM policy.** Traefik handles the gateway layer; AWS cloud-controller-manager handles the NLB provisioning.
 
@@ -113,7 +113,7 @@ ClusterIP Services → Node.js Pods
 
 This repo ships two Node.js apps and demonstrates two common Gateway API routing
 patterns. Each pattern lives in its own folder under `k8s-manifests/` and is
-self-contained — it includes both app deployments plus the HTTPRoute(s) specific
+self-contained - it includes both app deployments plus the HTTPRoute(s) specific
 to that pattern, deployed into **its own dedicated namespace** so the parts are
 fully isolated from one another and can coexist on the same cluster/NLB.
 
@@ -122,7 +122,7 @@ fully isolated from one another and can coexist on the same cluster/NLB.
 | **Part 01** | Hostname-Based Routing | `k8s-manifests/Part_01` | `nodejs-app-part1` | `app1.chinmayto.com`, `app2.chinmayto.com` | app-1 / app-2 by Host header |
 | **Part 02** | URL Rewriting | `k8s-manifests/Part_02` | `nodejs-app-part2` | `app.chinmayto.com/app1/*`, `app.chinmayto.com/app2/*` | app-1 / app-2, prefix stripped |
 
-Both parts target the **same Traefik Gateway** — the one auto-created by the
+Both parts target the **same Traefik Gateway** - the one auto-created by the
 Helm chart. The HTTPRoutes attach to it via:
 
 ```yaml
@@ -132,7 +132,7 @@ parentRefs:
     sectionName: web     # the named "web" listener (port 80)
 ```
 
-### Part 01 — Hostname-Based Routing
+### Part 01 - Hostname-Based Routing
 
 Two HTTPRoutes, each matching a distinct hostname. The request `Host` header
 decides which backend serves it. Uses the `app1`/`app2` Route53 subdomains.
@@ -155,7 +155,7 @@ rules:
       - { name: service-nodejs-app-2, port: 80 }
 ```
 
-### Part 02 — URL Rewriting
+### Part 02 - URL Rewriting
 
 One HTTPRoute on a single hostname matching a path **prefix**, with a `URLRewrite`
 filter that strips the prefix before forwarding. The backend only ever sees `/`,
@@ -237,10 +237,10 @@ aws eks --region us-east-1 update-kubeconfig --name CT-EKS-Cluster
 # Pick ONE routing part and apply everything in its folder.
 # Each folder contains both app deployments plus its HTTPRoute(s).
 
-# Part 01 — Hostname-Based Routing
+# Part 01 - Hostname-Based Routing
 kubectl apply -f k8s-manifests/Part_01/
 
-# Part 02 — URL Rewriting
+# Part 02 - URL Rewriting
 kubectl apply -f k8s-manifests/Part_02/
 ```
 
@@ -271,22 +271,22 @@ kubectl get httproute -A
 ```
 # Application responding? (use the URL(s) for the part you deployed)
 
-# Part 01 — Hostname-Based Routing
+# Part 01 - Hostname-Based Routing
 curl http://app1.chinmayto.com
 curl http://app2.chinmayto.com
 ```
-![Hostname-based routing — app1.chinmayto.com serving app-1](images/host-based-app1.png)
+![Hostname-based routing - app1.chinmayto.com serving app-1](images/host-based-app1.png)
 
-![Hostname-based routing — app2.chinmayto.com serving app-2](images/host-based-app2.png)
+![Hostname-based routing - app2.chinmayto.com serving app-2](images/host-based-app2.png)
 
 ```
-# Part 02 — URL Rewriting (note the trailing slash; the /app1 prefix is stripped)
+# Part 02 - URL Rewriting (note the trailing slash; the /app1 prefix is stripped)
 curl http://app.chinmayto.com/app1/
 curl http://app.chinmayto.com/app2/
 ```
-![URL rewriting — app.chinmayto.com/app1/ serving app-1](images/url-rewriting-app1.png)
+![URL rewriting - app.chinmayto.com/app1/ serving app-1](images/url-rewriting-app1.png)
 
-![URL rewriting — app.chinmayto.com/app2/ serving app-2](images/url-rewriting-app2.png)
+![URL rewriting - app.chinmayto.com/app2/ serving app-2](images/url-rewriting-app2.png)
 
 ### Key Terraform Resources
 
@@ -336,7 +336,7 @@ data "kubernetes_service_v1" "traefik" {
   depends_on = [time_sleep.wait_for_nlb]
 }
 
-# app.<domain>  — used by Part_02 (URL rewrite)
+# app.<domain>  - used by Part_02 (URL rewrite)
 resource "aws_route53_record" "nodejs_app" {
   zone_id = data.aws_route53_zone.main.zone_id
   name    = "${var.app_subdomain}.${var.domain_name}"
@@ -349,7 +349,7 @@ resource "aws_route53_record" "nodejs_app" {
   }
 }
 
-# app1.<domain> / app2.<domain> — used by Part_01 (hostname-based routing).
+# app1.<domain> / app2.<domain> - used by Part_01 (hostname-based routing).
 # Both alias to the SAME NLB; the HTTPRoute hostnames do the differentiation.
 resource "aws_route53_record" "nodejs_app_1" {
   zone_id = data.aws_route53_zone.main.zone_id
@@ -389,7 +389,7 @@ parentRefs:
     sectionName: web
 ```
 
-**HTTPRoute manifest — Part 01 example (`Part_01/gateway-api-nodejs-app.yaml`)**
+**HTTPRoute manifest - Part 01 example (`Part_01/gateway-api-nodejs-app.yaml`)**
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
@@ -421,7 +421,7 @@ variant.
 
 ## Cleanup
 
-To tear everything down cleanly — delete the Kubernetes resources first so the NLB is deprovisioned before Terraform tries to destroy the VPC.
+To tear everything down cleanly - delete the Kubernetes resources first so the NLB is deprovisioned before Terraform tries to destroy the VPC.
 
 ```bash
 # 1. Delete the Kubernetes resources for whichever part(s) you deployed.
@@ -447,15 +447,15 @@ terraform destroy
 
 The Kubernetes Gateway API is a genuine step forward from the Ingress spec. The separation between `GatewayClass`, `Gateway`, and `HTTPRoute` maps cleanly onto how real platform and application teams work. The nginx Ingress controller served us well for years, but with active development winding down and Gateway API reaching GA, now is the right time to migrate.
 
-Traefik makes this particularly straightforward on EKS — no IAM roles, no IRSA, no separate controller installation just to provision a load balancer. One Helm chart, one `helm_release` resource in Terraform, and you have a production-ready Gateway API implementation with an NLB and Route53 DNS fully automated.
+Traefik makes this particularly straightforward on EKS - no IAM roles, no IRSA, no separate controller installation just to provision a load balancer. One Helm chart, one `helm_release` resource in Terraform, and you have a production-ready Gateway API implementation with an NLB and Route53 DNS fully automated.
 
-The full deployment — VPC, EKS, Traefik, NLB, Route53 — is a single `terraform apply`. That's the kind of operational simplicity that makes a difference at scale.
+The full deployment - VPC, EKS, Traefik, NLB, Route53 - is a single `terraform apply`. That's the kind of operational simplicity that makes a difference at scale.
 
 ---
 
 ## References
 
 - **GitHub Repository**: [chinmayto/terraform-aws-eks-gateway-api](https://github.com/chinmayto/terraform-aws-eks-gateway-api)
-- [Kubernetes Gateway API — Official Docs](https://gateway-api.sigs.k8s.io/)
-- [Gateway API — Supported Features by Implementation](https://gateway-api.sigs.k8s.io/implementations/)
+- [Kubernetes Gateway API - Official Docs](https://gateway-api.sigs.k8s.io/)
+- [Gateway API - Supported Features by Implementation](https://gateway-api.sigs.k8s.io/implementations/)
 - [Traefik Gateway API Documentation](https://doc.traefik.io/traefik/routing/providers/kubernetes-gateway/)
