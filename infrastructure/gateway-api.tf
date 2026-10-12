@@ -6,7 +6,7 @@
 ################################################################################
 resource "null_resource" "gateway_api_crds" {
   provisioner "local-exec" {
-    command = "kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml"
+    command = "kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/standard-install.yaml"
   }
 
   depends_on = [module.eks, null_resource.update_kubeconfig]
@@ -90,9 +90,9 @@ resource "helm_release" "traefik" {
         namespace = kubernetes_namespace_v1.traefik.metadata[0].name
         listeners = {
           web = {
-            port     = 8000
-            protocol = "HTTP"
-            hostname = var.domain_name == "" ? "" : "*.${var.domain_name}"
+            port            = 8000
+            protocol        = "HTTP"
+            hostname        = var.domain_name == "" ? "" : "*.${var.domain_name}"
             namespacePolicy = "All"
           }
         }
