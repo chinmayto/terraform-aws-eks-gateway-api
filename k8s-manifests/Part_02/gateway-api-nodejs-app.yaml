@@ -1,0 +1,54 @@
+####################################################################################
+### Part 02 — URL Rewriting
+###
+### A single hostname (app.chinmayto.com) matches a path prefix and REWRITES the
+### URL path before forwarding to the backend, so the app receives "/" instead of
+### the external prefix:
+###   app.chinmayto.com/app1/...  -> rewrite prefix "/app1" to "/" -> service-nodejs-app-1
+###   app.chinmayto.com/app2/...  -> rewrite prefix "/app2" to "/" -> service-nodejs-app-2
+###
+### The URLRewrite filter (type ReplacePrefixMatch) strips the matched PathPrefix
+### so backends that only know about "/" keep working behind a sub-path.
+###
+### Namespace: nodejs-app-part2 (isolated from the other parts)
+####################################################################################
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: simple-nodejs-httproute
+  namespace: nodejs-app-part2
+spec:
+  parentRefs:
+    - name: traefik        # Gateway auto-created by the Traefik Helm chart
+      namespace: traefik   # Traefik deploys it into its own namespace
+      sectionName: web     # Ties to the named "web" listener (port 80)
+  hostnames:
+    - "app.chinmayto.com"
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /app1
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+      backendRefs:
+        - name: service-nodejs-app-1
+          port: 80
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /app2
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+      backendRefs:
+        - name: service-nodejs-app-2
+          port: 80

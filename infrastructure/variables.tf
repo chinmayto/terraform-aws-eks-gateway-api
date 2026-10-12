@@ -44,7 +44,19 @@ variable "domain_name" {
 }
 
 variable "app_subdomain" {
-  description = "Subdomain for Node.js application"
+  description = "Subdomain for Node.js application (path-based routing / URL rewriting)"
   type        = string
   default     = "app"
+}
+
+variable "app1_subdomain" {
+  description = "Subdomain for Node.js application 1 (hostname-based routing)"
+  type        = string
+  default     = "app1"
+}
+
+variable "app2_subdomain" {
+  description = "Subdomain for Node.js application 2 (hostname-based routing)"
+  type        = string
+  default     = "app2"
 }

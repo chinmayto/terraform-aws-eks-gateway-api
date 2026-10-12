@@ -50,5 +50,11 @@ output "nodejs_app_dns_info" {
     app_url        = "http://${var.app_subdomain}.${var.domain_name}"
     hosted_zone_id = data.aws_route53_zone.main.zone_id
     nlb_hostname   = data.kubernetes_service_v1.traefik.status[0].load_balancer[0].ingress[0].hostname
+
+    # Hostname-based routing subdomains (Part_01)
+    app1_hostname = "${var.app1_subdomain}.${var.domain_name}"
+    app1_url      = "http://${var.app1_subdomain}.${var.domain_name}"
+    app2_hostname = "${var.app2_subdomain}.${var.domain_name}"
+    app2_url      = "http://${var.app2_subdomain}.${var.domain_name}"
   }
 }

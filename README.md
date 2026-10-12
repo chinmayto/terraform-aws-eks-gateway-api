@@ -69,22 +69,32 @@ Here's what we're building:
 Internet
     │
     ▼
-Route53 A-alias (app.chinmayto.com)
-    │
+Route53 A-alias records (app / app1 / app2 .chinmayto.com)
+    │   all three aliased to the SAME NLB hostname
     ▼
-AWS Network Load Balancer          ← provisioned automatically by EKS
+AWS Network Load Balancer          ← ONE NLB, provisioned automatically by EKS
     │                                 when Traefik Service type=LoadBalancer
     ▼
 Traefik Pod (Deployment, 2 replicas, namespace: traefik)
     │   GatewayClass: traefik
-    │   Gateway: app-gateway (namespace: gateway-system)
+    │   Gateway: traefik (namespace: traefik, listener "web" on port 80)
     ▼
-HTTPRoute (namespace: simple-nodejs-app)
-    │   hostname: app.chinmayto.com
-    │   path: /
+HTTPRoute(s) + apps (one isolated namespace per part)
+    │   Part_01 → namespace nodejs-app-part1
+    │   Part_02 → namespace nodejs-app-part2
+    │   Routing differs per part (see "Routing Patterns" below):
+    │     Part_01 → by hostname   (app1 / app2)
+    │     Part_02 → by path + URL rewrite (/app1/*, /app2/*)
     ▼
-ClusterIP Service → Node.js Pod (port 8080)
+ClusterIP Services → Node.js Pods
+    service-nodejs-app-1 (port 80 → container 8080)
+    service-nodejs-app-2 (port 80 → container 8081)
 ```
+
+> **Only one NLB is created.** All routing patterns and both apps sit behind the
+> single Traefik `LoadBalancer` Service. The `app`, `app1`, and `app2` Route53
+> records all alias to that one NLB; traffic is differentiated inside the cluster
+> at the Gateway/HTTPRoute layer, not at the load balancer.
 
 **Infrastructure components (all Terraform-managed):**
 
@@ -97,43 +107,88 @@ ClusterIP Service → Node.js Pod (port 8080)
 
 **No AWS Load Balancer Controller. No IRSA. No separate IAM policy.** Traefik handles the gateway layer; AWS cloud-controller-manager handles the NLB provisioning.
 
-### File Structure
+---
 
+## Routing Patterns
+
+This repo ships two Node.js apps and demonstrates two common Gateway API routing
+patterns. Each pattern lives in its own folder under `k8s-manifests/` and is
+self-contained — it includes both app deployments plus the HTTPRoute(s) specific
+to that pattern, deployed into **its own dedicated namespace** so the parts are
+fully isolated from one another and can coexist on the same cluster/NLB.
+
+| | Pattern | Folder | Namespace | Entry URL(s) | Backend |
+|---|---|---|---|---|---|
+| **Part 01** | Hostname-Based Routing | `k8s-manifests/Part_01` | `nodejs-app-part1` | `app1.chinmayto.com`, `app2.chinmayto.com` | app-1 / app-2 by Host header |
+| **Part 02** | URL Rewriting | `k8s-manifests/Part_02` | `nodejs-app-part2` | `app.chinmayto.com/app1/*`, `app.chinmayto.com/app2/*` | app-1 / app-2, prefix stripped |
+
+Both parts target the **same Traefik Gateway** — the one auto-created by the
+Helm chart. The HTTPRoutes attach to it via:
+
+```yaml
+parentRefs:
+  - name: traefik        # Gateway auto-created by the Traefik Helm chart
+    namespace: traefik   # Traefik deploys it into its own namespace
+    sectionName: web     # the named "web" listener (port 80)
 ```
-terraform-aws-eks-gateway-api/
-├── infrastructure/
-│   ├── providers.tf          # AWS, Kubernetes, Helm, Time providers
-│   ├── variables.tf          # Region, cluster name, domain, subnets
-│   ├── main.tf               # VPC + EKS modules, Route53 data source
-│   ├── gateway-api.tf        # Gateway API CRDs + Traefik Helm release
-│   ├── app-dns.tf            # data.kubernetes_service_v1 + aws_route53_record
-│   └── outputs.tf            # Cluster endpoint, VPC, DNS info
-├── k8s-manifests/
-│   ├── deploy-simple-nodejs-app.yaml
-│   └── gateway-api-nodejs-app.yaml  # HTTPRoute → Traefik Gateway
-└── README.md
+
+### Part 01 — Hostname-Based Routing
+
+Two HTTPRoutes, each matching a distinct hostname. The request `Host` header
+decides which backend serves it. Uses the `app1`/`app2` Route53 subdomains.
+
+```yaml
+# app1.chinmayto.com -> service-nodejs-app-1
+hostnames: ["app1.chinmayto.com"]
+rules:
+  - matches:
+      - path: { type: PathPrefix, value: / }
+    backendRefs:
+      - { name: service-nodejs-app-1, port: 80 }
+---
+# app2.chinmayto.com -> service-nodejs-app-2
+hostnames: ["app2.chinmayto.com"]
+rules:
+  - matches:
+      - path: { type: PathPrefix, value: / }
+    backendRefs:
+      - { name: service-nodejs-app-2, port: 80 }
+```
+
+### Part 02 — URL Rewriting
+
+One HTTPRoute on a single hostname matching a path **prefix**, with a `URLRewrite`
+filter that strips the prefix before forwarding. The backend only ever sees `/`,
+so apps that know nothing about the sub-path keep working behind it. (This replaces
+a naive exact-path approach, where the backend would receive `/app1` unchanged and
+return `Cannot GET /app1` because it only serves `/`.)
+
+```yaml
+hostnames: ["app.chinmayto.com"]
+rules:
+  - matches:
+      - path: { type: PathPrefix, value: /app1 }
+    filters:
+      - type: URLRewrite
+        urlRewrite:
+          path: { type: ReplacePrefixMatch, replacePrefixMatch: / }
+    backendRefs:
+      - { name: service-nodejs-app-1, port: 80 }
+  - matches:
+      - path: { type: PathPrefix, value: /app2 }
+    filters:
+      - type: URLRewrite
+        urlRewrite:
+          path: { type: ReplacePrefixMatch, replacePrefixMatch: / }
+    backendRefs:
+      - { name: service-nodejs-app-2, port: 80 }
 ```
 
 ---
 
 ## Step-by-Step Deployment
 
-### Prerequisites
-
-- AWS CLI configured with permissions to create EKS, VPC, IAM, Route53 resources
-- Terraform >= 1.9
-- `kubectl` installed
-- A domain registered in Route53 (this guide uses `chinmayto.com`)
-
-### 1. Clone and Initialize
-
-```bash
-git clone https://github.com/chinmayto/terraform-aws-eks-gateway-api
-cd terraform-aws-eks-gateway-api/infrastructure
-terraform init
-```
-
-### 2. Deploy Infrastructure
+### 1. Deploy Infrastructure
 
 ```bash
 terraform plan
@@ -157,6 +212,10 @@ Outputs:
 
 nodejs_app_dns_info = {
   "app_url"        = "http://app.chinmayto.com"
+  "app1_hostname"  = "app1.chinmayto.com"
+  "app1_url"       = "http://app1.chinmayto.com"
+  "app2_hostname"  = "app2.chinmayto.com"
+  "app2_url"       = "http://app2.chinmayto.com"
   "full_hostname"  = "app.chinmayto.com"
   "hosted_zone_id" = "Z0XXXXXXXXXXXXXXXXX"
   "nlb_hostname"   = "xxxx.elb.us-east-1.amazonaws.com"
@@ -165,16 +224,31 @@ nodejs_app_dns_info = {
 }
 ```
 
-### 3. Deploy Kubernetes Manifests
+Terraform creates **three** Route53 A-alias records (`app`, `app1`, `app2`), all
+pointing at the single Traefik NLB. Which hostnames/paths actually route depends
+on which part's manifests you apply next.
+
+### 2. Deploy Kubernetes Manifests
 
 ```bash
 # Update kubeconfig (Terraform does this automatically, but run it if needed)
 aws eks --region us-east-1 update-kubeconfig --name CT-EKS-Cluster
 
-# Deploy the Node.js application and HTTPRoute
-kubectl apply -f k8s-manifests/deploy-simple-nodejs-app.yaml
-kubectl apply -f k8s-manifests/gateway-api-nodejs-app.yaml
+# Pick ONE routing part and apply everything in its folder.
+# Each folder contains both app deployments plus its HTTPRoute(s).
+
+# Part 01 — Hostname-Based Routing
+kubectl apply -f k8s-manifests/Part_01/
+
+# Part 02 — URL Rewriting
+kubectl apply -f k8s-manifests/Part_02/
 ```
+
+> Each part deploys into its own namespace (`nodejs-app-part1` / `nodejs-app-part2`),
+> so applying a part never touches the other part's resources. Part_01 uses distinct
+> hostnames (`app1`/`app2`) and Part_02 uses `app`, so the two can run side by side
+> without clashing. To fully remove a part, delete its namespace:
+> `kubectl delete namespace nodejs-app-part2`.
 
 ### 4. Verify
 
@@ -185,15 +259,34 @@ kubectl get pods -n traefik
 # GatewayClass accepted?
 kubectl get gatewayclass traefik
 
-# Gateway ready?
-kubectl get gateway app-gateway -n gateway-system
+# Gateway ready? (auto-created by the Traefik Helm chart in the traefik namespace)
+kubectl get gateway traefik -n traefik
 
-# HTTPRoute accepted?
-kubectl get httproute -n simple-nodejs-app
-
-# Application responding?
-curl http://app.chinmayto.com
+# HTTPRoute(s) accepted? (use the namespace for the part you deployed)
+kubectl get httproute -n nodejs-app-part1   # or -part2
+# ...or across all namespaces:
+kubectl get httproute -A
 ```
+
+```
+# Application responding? (use the URL(s) for the part you deployed)
+
+# Part 01 — Hostname-Based Routing
+curl http://app1.chinmayto.com
+curl http://app2.chinmayto.com
+```
+![Hostname-based routing — app1.chinmayto.com serving app-1](images/host-based-app1.png)
+
+![Hostname-based routing — app2.chinmayto.com serving app-2](images/host-based-app2.png)
+
+```
+# Part 02 — URL Rewriting (note the trailing slash; the /app1 prefix is stripped)
+curl http://app.chinmayto.com/app1/
+curl http://app.chinmayto.com/app2/
+```
+![URL rewriting — app.chinmayto.com/app1/ serving app-1](images/url-rewriting-app1.png)
+
+![URL rewriting — app.chinmayto.com/app2/ serving app-2](images/url-rewriting-app2.png)
 
 ### Key Terraform Resources
 
@@ -243,6 +336,7 @@ data "kubernetes_service_v1" "traefik" {
   depends_on = [time_sleep.wait_for_nlb]
 }
 
+# app.<domain>  — used by Part_02 (URL rewrite)
 resource "aws_route53_record" "nodejs_app" {
   zone_id = data.aws_route53_zone.main.zone_id
   name    = "${var.app_subdomain}.${var.domain_name}"
@@ -254,51 +348,74 @@ resource "aws_route53_record" "nodejs_app" {
     evaluate_target_health = true
   }
 }
+
+# app1.<domain> / app2.<domain> — used by Part_01 (hostname-based routing).
+# Both alias to the SAME NLB; the HTTPRoute hostnames do the differentiation.
+resource "aws_route53_record" "nodejs_app_1" {
+  zone_id = data.aws_route53_zone.main.zone_id
+  name    = "${var.app1_subdomain}.${var.domain_name}"
+  type    = "A"
+
+  alias {
+    name                   = data.kubernetes_service_v1.traefik.status[0].load_balancer[0].ingress[0].hostname
+    zone_id                = local.nlb_hosted_zone_id
+    evaluate_target_health = true
+  }
+}
+
+resource "aws_route53_record" "nodejs_app_2" {
+  zone_id = data.aws_route53_zone.main.zone_id
+  name    = "${var.app2_subdomain}.${var.domain_name}"
+  type    = "A"
+
+  alias {
+    name                   = data.kubernetes_service_v1.traefik.status[0].load_balancer[0].ingress[0].hostname
+    zone_id                = local.nlb_hosted_zone_id
+    evaluate_target_health = true
+  }
+}
 ```
 
-**Gateway manifest (`app-gateway.yaml`)**
+**Gateway (auto-created by the Traefik Helm chart)**
+
+There's no hand-written Gateway manifest. The Traefik chart (`gateway.enabled = true`)
+creates a `Gateway` named `traefik` in the `traefik` namespace with a `web` listener
+on port 80. Every HTTPRoute attaches to it via `parentRefs`:
 
 ```yaml
-apiVersion: gateway.networking.k8s.io/v1
-kind: Gateway
-metadata:
-  name: app-gateway
-  namespace: gateway-system
-spec:
-  gatewayClassName: traefik
-  listeners:
-    - name: http
-      port: 80
-      protocol: HTTP
-      hostname: "app.chinmayto.com"
-      allowedRoutes:
-        namespaces:
-          from: All
+parentRefs:
+  - name: traefik
+    namespace: traefik
+    sectionName: web
 ```
 
-**HTTPRoute manifest (`gateway-api-nodejs-app.yaml`)**
+**HTTPRoute manifest — Part 01 example (`Part_01/gateway-api-nodejs-app.yaml`)**
 
 ```yaml
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: simple-nodejs-httproute
-  namespace: simple-nodejs-app
+  name: nodejs-app-1-httproute
+  namespace: nodejs-app-part1
 spec:
   parentRefs:
-    - name: app-gateway
-      namespace: gateway-system
+    - name: traefik
+      namespace: traefik
+      sectionName: web
   hostnames:
-    - "app.chinmayto.com"
+    - "app1.chinmayto.com"
   rules:
     - matches:
         - path:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: service-nodejs-app
+        - name: service-nodejs-app-1
           port: 80
 ```
+
+See the [Routing Patterns](#routing-patterns) section for the Part 02 (URL rewrite)
+variant.
 
 ---
 
@@ -307,9 +424,12 @@ spec:
 To tear everything down cleanly — delete the Kubernetes resources first so the NLB is deprovisioned before Terraform tries to destroy the VPC.
 
 ```bash
-# 1. Delete Kubernetes resources (this deprovisions the NLB)
-kubectl delete -f k8s-manifests/gateway-api-nodejs-app.yaml
-kubectl delete -f k8s-manifests/deploy-simple-nodejs-app.yaml
+# 1. Delete the Kubernetes resources for whichever part(s) you deployed.
+#    Deleting a part's folder removes its Namespace, HTTPRoutes, Deployments
+#    and Services in one go.
+kubectl delete -f k8s-manifests/Part_01/
+
+kubectl delete -f k8s-manifests/Part_02/
 
 # 2. Wait ~60 seconds for the NLB to be fully removed by AWS
 sleep 60
@@ -339,5 +459,3 @@ The full deployment — VPC, EKS, Traefik, NLB, Route53 — is a single `terrafo
 - [Kubernetes Gateway API — Official Docs](https://gateway-api.sigs.k8s.io/)
 - [Gateway API — Supported Features by Implementation](https://gateway-api.sigs.k8s.io/implementations/)
 - [Traefik Gateway API Documentation](https://doc.traefik.io/traefik/routing/providers/kubernetes-gateway/)
-- [Traefik Helm Chart](https://github.com/traefik/traefik-helm-chart)
-- [Amazon EKS — Gateway API](https://docs.aws.amazon.com/eks/latest/userguide/gateway-api.html)

@@ -62,3 +62,33 @@ resource "aws_route53_record" "nodejs_app" {
     evaluate_target_health = true
   }
 }
+
+################################################################################
+# Route53 A-alias records for hostname-based routing (Part_01)
+#   app1.<domain> -> service-nodejs-app-1
+#   app2.<domain> -> service-nodejs-app-2
+# Both point to the same Traefik NLB; the HTTPRoute hostnames differentiate them.
+################################################################################
+resource "aws_route53_record" "nodejs_app_1" {
+  zone_id = data.aws_route53_zone.main.zone_id
+  name    = "${var.app1_subdomain}.${var.domain_name}"
+  type    = "A"
+
+  alias {
+    name                   = data.kubernetes_service_v1.traefik.status[0].load_balancer[0].ingress[0].hostname
+    zone_id                = local.nlb_hosted_zone_id
+    evaluate_target_health = true
+  }
+}
+
+resource "aws_route53_record" "nodejs_app_2" {
+  zone_id = data.aws_route53_zone.main.zone_id
+  name    = "${var.app2_subdomain}.${var.domain_name}"
+  type    = "A"
+
+  alias {
+    name                   = data.kubernetes_service_v1.traefik.status[0].load_balancer[0].ingress[0].hostname
+    zone_id                = local.nlb_hosted_zone_id
+    evaluate_target_health = true
+  }
+}
